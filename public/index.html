@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 Sensor Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-orb bg-orb-a"></div>
+    <div class="bg-orb bg-orb-b"></div>
+
+    <main class="layout">
+      <header class="hero card">
+        <p class="eyebrow">Live Telemetry</p>
+        <h1>Sensor Signal Board</h1>
+        <p class="subtitle">
+          Real-time and historical values from MQTT + InfluxDB, split by room.
+        </p>
+        <div class="controls">
+          <div class="control-group">
+            <label for="chartType">Chart Type</label>
+            <select id="chartType">
+              <option value="line" selected>Line Chart</option>
+              <option value="bar">Bar Chart</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="rangeMinutes">Time Range</label>
+            <select id="rangeMinutes">
+              <option value="0.25">Last 15 sec</option>
+              <option value="0.5" selected>Last 30 sec</option>
+              <option value="1">Last 1 min</option>
+              <option value="5">Last 5 min</option>
+              <option value="15">Last 15 min</option>
+              <option value="30">Last 30 min</option>
+              <option value="60">Last 1 hour</option>
+              <option value="180">Last 3 hours</option>
+              <option value="360">Last 6 hours</option>
+              <option value="720">Last 12 hours</option>
+              <option value="1440">Last 24 hours</option>
+              <option value="10080">Last 7 days</option>
+              <option value="43200">Last 30 days</option>
+            </select>
+          </div>
+          <button id="refreshBtn" type="button">🔄 Refresh</button>
+          <button id="resetZoomBtn" type="button" style="display: none;">Reset Zoom</button>
+          <label class="checkbox-label">
+            <input type="checkbox" id="autoRefresh" checked />
+            Auto Refresh
+          </label>
+        </div>
+      </header>
+
+      <section id="roomGrid" class="room-grid"></section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.1.0/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
