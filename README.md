@@ -13,7 +13,7 @@ A web dashboard for visualizing sensor data (temperature, humidity, light, sound
 ## 2) Install and Configure
 
 ```bash
-npm install
+npm installs
 copy .env.example .env
 ```
 

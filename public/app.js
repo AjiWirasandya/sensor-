@@ -372,6 +372,7 @@ async function loadHistory(roomId) {
     const chart = roomState[roomId].charts[metric.key];
     if (!chart) return;
 
+    // Use category labels with proper timestamp formatting
     const labels = points.map((p) => formatChartLabel(p.x, minutesRange));
     const values = points.map((p) => Number(p.y));
     console.debug(`loadHistory ${roomId}/${metric.key} -> ${values.length} points`);
