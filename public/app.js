@@ -26,12 +26,11 @@ const socket = io();
 const roomGrid = document.getElementById("roomGrid");
 const rangeMinutesEl = document.getElementById("rangeMinutes");
 const refreshBtn = document.getElementById("refreshBtn");
+const exportExcelBtn = document.getElementById("exportExcelBtn");
 const resetZoomBtn = document.getElementById("resetZoomBtn");
-const chartTypeEl = document.getElementById("chartType");
 const autoRefreshEl = document.getElementById("autoRefresh");
 
 let HISTORY_REFRESH_MS = 5000;
-let currentChartType = "line";
 let autoRefreshEnabled = true;
 let autoRefreshInterval = null;
 
@@ -72,6 +71,15 @@ function formatChartLabel(timestampLike, minutesRange) {
   if (minutesRange < 24 * 60) return `${hh}:${min}`;
   if (minutesRange < 7 * 24 * 60) return `${dd}/${mm} ${hh}:${min}`;
   return `${dd}/${mm}/${yyyy}`;
+}
+
+function getHistoryWindow(minutesRange, endTimestamp = Date.now()) {
+  const safeMinutes = Math.max(0.25, Number(minutesRange) || 0.5);
+  const windowMs = safeMinutes * 60 * 1000;
+  return {
+    min: endTimestamp - windowMs,
+    max: endTimestamp
+  };
 }
 
 function createRoomCard(room) {
@@ -160,6 +168,11 @@ function getChartOptions(metric) {
         cornerRadius: 4,
         displayColors: true,
         callbacks: {
+          title: function(items) {
+            if (!items || !items.length) return '';
+            const xValue = items[0].parsed.x;
+            return formatChartLabel(xValue, Number(rangeMinutesEl.value || 0.5));
+          },
           label: function(context) {
             return `${context.dataset.label}: ${Number(context.parsed.y).toFixed(2)}`;
           }
@@ -192,11 +205,16 @@ function getChartOptions(metric) {
     },
     scales: {
       x: {
+        type: 'linear',
+        bounds: 'ticks',
         ticks: {
           maxTicksLimit: 6,
           maxRotation: 45,
           minRotation: 0,
-          autoSkip: true
+          autoSkip: true,
+          callback: function(value) {
+            return formatChartLabel(Number(value), Number(rangeMinutesEl.value || 0.5));
+          }
         }
       },
       y: {
@@ -228,20 +246,17 @@ function createCharts(roomId) {
     }
     const isPressure = metric.key === "pressure";
 
-    const chartType = currentChartType;
-
     const chartConfig = {
-      type: chartType,
+      type: 'line',
       data: {
-        labels: [],
         datasets: [
           {
             label: `${metric.label}`,
             data: [],
             borderColor: metric.color,
-            backgroundColor: (currentChartType === 'bar') ? `${metric.color}88` : `${metric.color}22`,
+            backgroundColor: `${metric.color}22`,
             tension: isPressure ? 0.35 : 0.55,
-            fill: (currentChartType === 'line'),
+            fill: true,
             pointRadius: isPressure ? 2 : 3,
             pointHoverRadius: isPressure ? 4 : 5,
             pointBackgroundColor: metric.color,
@@ -270,34 +285,15 @@ function createCharts(roomId) {
 
   
 
-function updateChartType(newType) {
-  currentChartType = newType;
-  
-  // Recreate all charts with new type
-  ROOMS.forEach((room) => {
-    METRICS.forEach((metric) => {
-      const chart = roomState[room.id].charts[metric.key];
-      if (!chart) return;
-      
-      chart.destroy();
-    });
-    createCharts(room.id);
-  });
-
-  // Reload the current history
-  ROOMS.forEach((room) => loadHistory(room.id));
-}
-
 function addRealtimeData(roomId, payload) {
   const timestamp = new Date(payload.timestamp || Date.now());
   const minutesRange = Number(rangeMinutesEl.value || 0.5);
-  const label = formatChartLabel(timestamp, minutesRange);
   
   METRICS.forEach((metric) => {
     if (payload[metric.key] === null || payload[metric.key] === undefined) return;
     
     roomState[roomId].realtimeBuffer[metric.key].push({
-      label,
+      label: formatChartLabel(timestamp, minutesRange),
       value: payload[metric.key],
       timestamp: timestamp
     });
@@ -312,15 +308,16 @@ function addRealtimeData(roomId, payload) {
     if (!chart) return;
 
     const dataset = chart.data.datasets[0].data;
-    const labels = chart.data.labels;
-    labels.push(label);
-    dataset.push(payload[metric.key]);
+    dataset.push({ x: timestamp.getTime(), y: Number(payload[metric.key]) });
 
     // Keep only last 50 points visible for smooth scrolling
     if (dataset.length > 50) {
       dataset.shift();
-      labels.shift();
     }
+
+    const window = getHistoryWindow(minutesRange, timestamp.getTime());
+    chart.options.scales.x.min = window.min;
+    chart.options.scales.x.max = window.max;
 
     try {
       chart.update('none'); // Update without animation for smooth real-time
@@ -364,6 +361,7 @@ async function loadHistory(roomId) {
 
   const data = await res.json();
   const minutesRange = Number(rangeMinutesEl.value || 0.5);
+  const window = getHistoryWindow(minutesRange, Date.now());
 
   METRICS.forEach((metric) => {
     const points = [...(data.points?.[metric.key] || [])].sort((left, right) => {
@@ -372,16 +370,17 @@ async function loadHistory(roomId) {
     const chart = roomState[roomId].charts[metric.key];
     if (!chart) return;
 
-    // Use category labels with proper timestamp formatting
-    const labels = points.map((p) => formatChartLabel(p.x, minutesRange));
-    const values = points.map((p) => Number(p.y));
+    const values = points
+      .map((p) => ({ x: new Date(p.x).getTime(), y: Number(p.y) }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
     console.debug(`loadHistory ${roomId}/${metric.key} -> ${values.length} points`);
-    chart.data.labels = labels;
     chart.data.datasets[0].data = values;
+    chart.options.scales.x.min = window.min;
+    chart.options.scales.x.max = window.max;
 
     // Auto-scale Y axis for pressure
     if (metric.key === "pressure") {
-      const yValues = values.filter((v) => Number.isFinite(v));
+      const yValues = values.map((v) => v.y).filter((v) => Number.isFinite(v));
       if (yValues.length > 0) {
         const min = Math.min(...yValues);
         const max = Math.max(...yValues);
@@ -450,10 +449,6 @@ rangeMinutesEl.addEventListener("change", () => {
   resetAutoRefresh();
 });
 
-chartTypeEl.addEventListener("change", (e) => {
-  updateChartType(e.target.value);
-});
-
 autoRefreshEl.addEventListener("change", (e) => {
   autoRefreshEnabled = e.target.checked;
   resetAutoRefresh();
@@ -461,6 +456,12 @@ autoRefreshEl.addEventListener("change", (e) => {
 
 refreshBtn.addEventListener("click", () => {
   ROOMS.forEach((room) => loadHistory(room.id));
+});
+
+exportExcelBtn.addEventListener("click", () => {
+  const minutes = Number(rangeMinutesEl.value || 0.5);
+  const query = new URLSearchParams({ minutes: String(minutes) });
+  window.location.href = `/api/export/excel?${query.toString()}`;
 });
 
 

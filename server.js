@@ -4,6 +4,7 @@ const path = require("path");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
+const ExcelJS = require("exceljs");
 
 const { SENSOR_KEYS, normalizePayload } = require("./src/sensorModel");
 const { connectMqtt } = require("./src/mqttClient");
@@ -67,6 +68,53 @@ function describeError(error) {
   }
 
   return details;
+}
+
+function formatJakartaTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
+}
+
+function pivotHistoryRows(rows) {
+  const byPoint = new Map();
+
+  rows.forEach((row) => {
+    const pointKey = `${row.time}|${row.device || "unknown"}`;
+    if (!byPoint.has(pointKey)) {
+      byPoint.set(pointKey, {
+        time: row.time,
+        device: row.device || "unknown",
+        temperature: null,
+        humidity: null,
+        light: null,
+        sound: null,
+        pressure: null
+      });
+    }
+
+    const point = byPoint.get(pointKey);
+    if (Object.prototype.hasOwnProperty.call(point, row.field)) {
+      point[row.field] = row.value;
+    }
+  });
+
+  return Array.from(byPoint.values()).sort((left, right) => {
+    return new Date(left.time).getTime() - new Date(right.time).getTime();
+  });
 }
 
 app.use(express.json());
@@ -176,6 +224,78 @@ app.get("/api/history", async (req, res) => {
       error: "Failed to query history from InfluxDB",
       details: describeError(error)
     });
+  }
+});
+
+app.get("/api/export/excel", async (req, res) => {
+  try {
+    if (!influx?.queryApi) {
+      return res.status(503).json({
+        error: "InfluxDB is not configured. Check INFLUX_URL, INFLUX_TOKEN, INFLUX_ORG, INFLUX_BUCKET."
+      });
+    }
+
+    const minutes = Number(req.query.minutes || 60);
+    const roomQuery = String(req.query.room || "").trim();
+    const targetRooms = roomQuery ? [roomQuery] : ROOMS;
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "sensor-dashboard";
+    workbook.created = new Date();
+
+    for (const roomId of targetRooms) {
+      const rows = await queryHistory(influx.queryApi, minutes, roomId);
+      const points = pivotHistoryRows(rows);
+      const sheet = workbook.addWorksheet(roomId.slice(0, 31));
+
+      sheet.columns = [
+        { header: "Waktu", key: "time", width: 22 },
+        { header: "Device", key: "device", width: 14 },
+        { header: "Temperature", key: "temperature", width: 14 },
+        { header: "Humidity", key: "humidity", width: 14 },
+        { header: "Light", key: "light", width: 12 },
+        { header: "Sound", key: "sound", width: 12 },
+        { header: "Pressure", key: "pressure", width: 14 }
+      ];
+
+      if (points.length === 0) {
+        sheet.addRow({
+          time: "No data in selected range",
+          device: "-",
+          temperature: null,
+          humidity: null,
+          light: null,
+          sound: null,
+          pressure: null
+        });
+      } else {
+        points.forEach((point) => {
+          sheet.addRow({
+            time: formatJakartaTimestamp(point.time),
+            device: point.device,
+            temperature: point.temperature,
+            humidity: point.humidity,
+            light: point.light,
+            sound: point.sound,
+            pressure: point.pressure
+          });
+        });
+      }
+
+      sheet.getRow(1).font = { bold: true };
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `sensor_history_${minutes}m_${timestamp}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (error) {
+    console.error("[API] /api/export/excel error:", describeError(error));
+    res.status(500).json({ error: "Failed to export Excel", details: describeError(error) });
   }
 });
 
