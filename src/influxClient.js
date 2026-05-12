@@ -1,4 +1,5 @@
 const { InfluxDB, Point } = require("@influxdata/influxdb-client");
+const util = require("util");
 
 const influxConfig = {
   url: process.env.INFLUX_URL,
@@ -61,6 +62,8 @@ ${roomFilter}  |> filter(fn: (r) => r._field == "temperature" or r._field == "hu
   |> sort(columns: ["_time"], desc: false)
 `;
 
+  console.debug(`[queryHistory] minutes=${minutes} safeMinutes=${safeMinutes} room=${room}`);
+
   const rows = [];
   await new Promise((resolve, reject) => {
     queryApi.queryRows(flux, {
@@ -83,9 +86,11 @@ ${roomFilter}  |> filter(fn: (r) => r._field == "temperature" or r._field == "hu
         });
       },
       error(error) {
+        console.error(`[queryHistory] queryRows error for room=${room}:`, util.inspect(error, { depth: 5, breakLength: 120 }));
         reject(error);
       },
       complete() {
+        console.debug(`[queryHistory] returned ${rows.length} total rows for room=${room}`);
         resolve();
       }
     });

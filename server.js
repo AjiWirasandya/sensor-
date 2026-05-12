@@ -45,6 +45,30 @@ if (!isInfluxConfigured()) {
   console.warn("[InfluxDB] Not fully configured. Historical queries will be unavailable.");
 }
 
+function describeError(error) {
+  if (!error) return "Unknown error";
+
+  const details = {
+    name: error.name,
+    message: error.message,
+    stack: error.stack
+  };
+
+  if (Array.isArray(error.errors) && error.errors.length > 0) {
+    details.errors = error.errors.map((nestedError) => ({
+      name: nestedError?.name,
+      message: nestedError?.message,
+      code: nestedError?.code,
+      errno: nestedError?.errno,
+      syscall: nestedError?.syscall,
+      address: nestedError?.address,
+      port: nestedError?.port
+    }));
+  }
+
+  return details;
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -97,8 +121,8 @@ app.get("/api/influx-info", async (req, res) => {
 
     res.json(info);
   } catch (error) {
-    console.error("[API] /api/influx-info error:", error.message);
-    res.status(500).json({ error: error.message });
+    console.error("[API] /api/influx-info error:", describeError(error));
+    res.status(500).json({ error: error.message, details: describeError(error) });
   }
 });
 
@@ -112,6 +136,7 @@ app.get("/api/history", async (req, res) => {
 
     const minutes = req.query.minutes || 60;
     const room = String(req.query.room || "").trim() || null;
+    console.log(`[/api/history] Request: minutes=${minutes} room=${room}`);
     const rows = await queryHistory(influx.queryApi, minutes, room);
 
     const history = {
@@ -131,13 +156,26 @@ app.get("/api/history", async (req, res) => {
       points.sort((left, right) => new Date(left.x).getTime() - new Date(right.x).getTime());
     });
 
+    const allPoints = Object.values(history).flat();
+    if (allPoints.length > 0) {
+      const times = allPoints.map(p => new Date(p.x).getTime()).sort((a, b) => a - b);
+      const earliest = new Date(times[0]);
+      const latest = new Date(times[times.length - 1]);
+      console.log(`[/api/history] Response: ${allPoints.length} total points, earliest=${earliest.toISOString()} latest=${latest.toISOString()}`);
+    } else {
+      console.log(`[/api/history] Response: 0 points returned`);
+    }
+
     res.json({
       rangeMinutes: Number(minutes),
       points: history
     });
   } catch (error) {
-    console.error("[API] /api/history error:", error.message);
-    res.status(500).json({ error: "Failed to query history from InfluxDB" });
+    console.error("[API] /api/history error:", describeError(error));
+    res.status(500).json({
+      error: "Failed to query history from InfluxDB",
+      details: describeError(error)
+    });
   }
 });
 
