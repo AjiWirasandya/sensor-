@@ -50,7 +50,9 @@ async function queryHistory(queryApi, minutes = 60, room = null) {
 
   const MAX_MINUTES = 30 * 24 * 60; // allow up to 30 days
   const safeMinutes = Math.max(1, Math.min(Number(minutes) || 60, MAX_MINUTES));
-  const roomFilter = room ? `  |> filter(fn: (r) => r.room == "${room}")\n` : "";
+  const roomFilter = room
+    ? `  |> filter(fn: (r) => r.room == "${room}" or r.device == "${room}" or r.deviceId == "${room}")\n`
+    : "";
 
   // Pivot so the sensor fields are in the same record and keep room/device tags
   const flux = `

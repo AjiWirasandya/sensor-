@@ -310,8 +310,9 @@ function addRealtimeData(roomId, payload) {
     const dataset = chart.data.datasets[0].data;
     dataset.push({ x: timestamp.getTime(), y: Number(payload[metric.key]) });
 
-    // Keep only last 50 points visible for smooth scrolling
-    if (dataset.length > 50) {
+    // Keep only points inside the selected history window.
+    const cutoff = timestamp.getTime() - (minutesRange * 60 * 1000);
+    while (dataset.length > 0 && dataset[0].x < cutoff) {
       dataset.shift();
     }
 
@@ -439,6 +440,8 @@ function resetAutoRefresh() {
   if (autoRefreshEnabled) {
     autoRefreshInterval = setInterval(() => {
       loadLatest();
+
+      ROOMS.forEach((room) => loadHistory(room.id));
     }, HISTORY_REFRESH_MS);
   }
 }
